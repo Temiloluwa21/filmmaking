@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+.DS_Store
+clip_features/
+extracted_features/
+uploads/
+outputs/
+*.mp4
+*.npy
+.vscode/
+.idea/
+model_weights_fold_*.pth
+model_weights_latest.pth
+model_weights.pth
+.idea/

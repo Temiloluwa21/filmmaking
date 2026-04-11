@@ -1,0 +1,11 @@
+torch>=2.0.0
+torchvision
+transformers
+opencv-python
+fastapi
+uvicorn
+scikit-learn
+python-multipart
+numpy
+pydantic
+scipy

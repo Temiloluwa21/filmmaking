@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingSection.classList.remove('hidden');
 
         try {
-            const response = await fetch('http://localhost:8000/api/summarize', {
+            const response = await fetch('/api/summarize', {
                 method: 'POST',
                 body: formData
             });

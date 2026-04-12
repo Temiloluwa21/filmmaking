@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
@@ -40,7 +41,7 @@ try:
     weights_path = os.path.join(os.path.dirname(__file__), '..', '..', 'model_weights_best.pth')
     if os.path.exists(weights_path):
         print(f"Loading weights from {weights_path}...")
-        summarizer.load_state_dict(torch.load(weights_path, map_location=device))
+        summarizer.load_state_dict(torch.load(weights_path, map_location=device), strict=False)
     else:
         print("Warning: model_weights_best.pth not found. Model will use random initialization.")
     
@@ -98,3 +99,10 @@ async def download_summary(task_id: str):
     if os.path.exists(file_path):
         return FileResponse(file_path, media_type="video/mp4", filename=f"summary_{task_id}.mp4")
     raise HTTPException(status_code=404, detail="File not found")
+
+# Serve Frontend statically at the root level (Must be mounted LAST to avoid catching /api routes)
+frontend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'frontend')
+if os.path.exists(frontend_path):
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+else:
+    print("Warning: Frontend directory not found. UI will not be served.")

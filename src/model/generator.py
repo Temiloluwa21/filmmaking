@@ -36,7 +36,7 @@ class SummaryGenerator:
                     seg_scores.append(0)
             
             # Use DP Knapsack for optimal selection (15% budget)
-            capacity = int(n_frames * 0.15)
+            capacity = max(int(n_frames * 0.15), 1) # Ensure at least 1 frame capacity
             weights = [min(segments[i][1], n_frames) - segments[i][0] for i in range(n_segs)]
             values = [int(s * 1000) for s in seg_scores]
             
@@ -62,8 +62,8 @@ class SummaryGenerator:
             selected_indices.sort()
 
         if not selected_indices:
-            print("No frames selected. Returning empty.")
-            return
+            print("Warning: Knapsack selected empty. Falling back to top 1 frame.")
+            selected_indices = [np.argmax(scores)]
 
         # Prepare to write video
         height, width, _ = frames[0].shape

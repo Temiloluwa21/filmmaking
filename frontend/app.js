@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingSection = document.getElementById('loading-section');
     const resultSection = document.getElementById('result-section');
     const uploadSection = document.getElementById('upload-section');
+    const loadingText = document.getElementById('loading-text');
     const summaryPlayer = document.getElementById('summary-player');
     const downloadLink = document.getElementById('download-link');
     const fileDropArea = document.getElementById('file-drop-area');
@@ -215,6 +216,21 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadSection.classList.add('hidden');
         loadingSection.classList.remove('hidden');
 
+        const loadingStates = [
+            "Analyzing Video Feed...",
+            "Extracting Semantic Frame Features...",
+            "Encoding Transformer Query...",
+            "Running Bi-LSTM Temporal Analysis...",
+            "Executing Knapsack Frame Selection...",
+            "Stitching Cinematic Highlights..."
+        ];
+        let stateIndex = 0;
+        loadingText.textContent = loadingStates[0];
+        const loadingInterval = setInterval(() => {
+            stateIndex = (stateIndex + 1) % loadingStates.length;
+            loadingText.textContent = loadingStates[stateIndex];
+        }, 3500);
+
         try {
             const response = await fetch('/api/summarize', {
                 method: 'POST',
@@ -241,6 +257,8 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast("An error occurred during processing. Please ensure your backend is running.", true);
             loadingSection.classList.add('hidden');
             uploadSection.classList.remove('hidden');
+        } finally {
+            clearInterval(loadingInterval);
         }
     });
 

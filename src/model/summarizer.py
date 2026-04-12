@@ -68,7 +68,7 @@ class SelfAttention(nn.Module):
         return self.norm(out + x) # Residual + Norm
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=1024):
+    def __init__(self, d_model, max_len=20000):
         super(PositionalEncoding, self).__init__()
         self.encoding = nn.Parameter(torch.zeros(1, max_len, d_model))
         

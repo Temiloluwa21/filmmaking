@@ -13,11 +13,16 @@ class VideoProcessor:
         self.MAX_FRAMES = 300  # Hard cap: guarantees <30s processing on CPU
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Load CLIP ViT-B/32
+        # Load CLIP ViT-B/32 — offline-first to avoid network failures
         print(f"Loading CLIP on {self.device}...")
         self.model_name = "openai/clip-vit-base-patch32"
-        self.model = CLIPModel.from_pretrained(self.model_name).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(self.model_name)
+        try:
+            self.model = CLIPModel.from_pretrained(self.model_name, local_files_only=True).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(self.model_name, local_files_only=True)
+        except Exception:
+            print("Cache miss — downloading CLIP from HuggingFace...")
+            self.model = CLIPModel.from_pretrained(self.model_name).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(self.model_name)
         self.model.eval()
 
     def extract_frames(self, video_path):

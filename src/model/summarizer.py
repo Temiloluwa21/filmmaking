@@ -154,8 +154,13 @@ class VideoSummarizer(nn.Module):
 class QueryEncoder:
     def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2", device=None):
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(self.device)
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+            self.model = AutoModel.from_pretrained(model_name, local_files_only=True).to(self.device)
+        except Exception:
+            print("Cache miss — downloading MiniLM from HuggingFace...")
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 
     def encode(self, query_text):

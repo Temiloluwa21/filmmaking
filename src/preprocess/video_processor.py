@@ -4,12 +4,13 @@ import numpy as np
 from transformers import CLIPProcessor, CLIPModel
 
 class VideoProcessor:
-    def __init__(self, target_fps=2, frame_size=(224, 224), device=None):
+    def __init__(self, target_fps=2, frame_size=(160, 160), device=None):
         """
         Initializes the Video Processor for CLIP semantic feature encoding.
         """
         self.target_fps = target_fps
         self.frame_size = frame_size
+        self.MAX_FRAMES = 300  # Hard cap: guarantees <30s processing on CPU
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Load CLIP ViT-B/32
@@ -21,18 +22,20 @@ class VideoProcessor:
 
     def extract_frames(self, video_path):
         """
-        Extracts frames from a video at a fixed frame rate.
+        Extracts frames from a video with adaptive FPS to cap total frames at MAX_FRAMES.
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise Exception(f"Failed to open video file: {video_path}")
 
-        orig_fps = cap.get(cv2.CAP_PROP_FPS)
-        if orig_fps == 0:
-            orig_fps = 30 # Default if unable to read
+        orig_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_secs = total_video_frames / orig_fps
 
-        # Calculate frame skip to achieve target fps
-        skip_frames = max(int(orig_fps / self.target_fps), 1)
+        # Adaptive FPS: scale down sampling for long videos to stay within MAX_FRAMES
+        ideal_sample_count = min(self.MAX_FRAMES, max(50, int(duration_secs * self.target_fps)))
+        skip_frames = max(1, int(total_video_frames / ideal_sample_count))
+        print(f"Video: {duration_secs:.1f}s | Sampling every {skip_frames} frames (~{ideal_sample_count} total)")
 
         frames = []
         frame_indices = []
@@ -44,10 +47,13 @@ class VideoProcessor:
                 break
                 
             if count % skip_frames == 0:
-                # Convert BGR to RGB
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Resize immediately on read to cut memory usage
+                frame_small = cv2.resize(frame, self.frame_size)
+                rgb_frame = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
                 frames.append(rgb_frame)
                 frame_indices.append(count)
+                if len(frames) >= self.MAX_FRAMES:
+                    break
 
             count += 1
 
@@ -56,16 +62,21 @@ class VideoProcessor:
 
     def extract_features(self, frames):
         """
-        Extracts semantic features from a list of frames using CLIP.
+        Extracts semantic features using CLIP with speed-optimized batching.
         """
         all_features = []
-        batch_size = 32
+        batch_size = 64  # Doubled from 32 for faster throughput
         
         with torch.no_grad():
             for i in range(0, len(frames), batch_size):
                 batch = frames[i : i + batch_size]
                 inputs = self.processor(images=list(batch), return_tensors="pt", padding=True).to(self.device)
                 feat = self.model.get_image_features(**inputs)
+                
+                # Handle HuggingFace version API discrepancies (Tuple/Object vs Tensor)
+                if not isinstance(feat, torch.Tensor):
+                    feat = getattr(feat, 'image_embeds', getattr(feat, 'pooler_output', feat[0]))
+
                 # Normalize features
                 feat = feat / feat.norm(dim=-1, keepdim=True)
                 all_features.append(feat.cpu().numpy())

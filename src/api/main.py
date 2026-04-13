@@ -6,6 +6,7 @@ import shutil
 import os
 import uuid
 import sys
+import traceback
 
 # Update path to import our modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -31,6 +32,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Initialize Models (Lazy loading or global is fine for prototype)
 print("Initializing models...")
+processor = None
+query_encoder = None
+summarizer = None
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 try:
     processor = VideoProcessor(target_fps=2)
     device = processor.device
@@ -53,8 +58,12 @@ except Exception as e:
 @app.post("/api/summarize")
 async def summarize_video(
     video: UploadFile = File(...), 
-    query: str = Form(...)
+    query: str = Form("")
 ):
+    budget = 0.15
+    if processor is None or summarizer is None:
+        raise HTTPException(status_code=503, detail="AI Models failed to download/initialize. Please check your internet connection and restart the server.")
+        
     if not video.filename.endswith('.mp4'):
         raise HTTPException(status_code=400, detail="Only .mp4 files are supported.")
         
@@ -67,8 +76,13 @@ async def summarize_video(
         shutil.copyfileobj(video.file, buffer)
         
     try:
-        # Step 1: Preprocess (Extract frames, features, and segments)
-        features, frames, frame_indices, fps, segments = processor.process_video(video_path)
+        # Step 1: Preprocess (Extract 480p frames, features, segments)
+        features, frames, frame_indices, fps, segments, skip_frames = processor.process_video(video_path)
+
+        # Determine video duration and set output target
+        duration_secs = (frame_indices[-1] / fps) if frame_indices else 60
+        target_secs = 300 if duration_secs >= 600 else 120  # 5min for long, 2min for short
+        print(f"Source duration: {duration_secs:.0f}s | Output target: {target_secs}s")
         
         # Step 2: Encode Query
         print(f"Encoding query: '{query}'")
@@ -86,11 +100,17 @@ async def summarize_video(
         # Step 4: Generate Summary (Shot-Based)
         print("Generating summary video...")
         generator = SummaryGenerator()
-        generator.generate_summary(frames, frame_indices, scores, out_path, fps=fps, segments=segments)
+        generator.generate_summary(frames, frame_indices, scores, out_path, fps=fps,
+                                   segments=segments, target_duration_secs=target_secs,
+                                   frames_per_sample=skip_frames)
 
         return FileResponse(out_path, media_type="video/mp4", filename=f"summary_{task_id}.mp4")
 
     except Exception as e:
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"Error in summarize: {error_msg}")
+        with open("server_error.log", "w") as f:
+            f.write(error_msg)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/download/{task_id}")

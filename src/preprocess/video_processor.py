@@ -4,12 +4,11 @@ import numpy as np
 from transformers import CLIPProcessor, CLIPModel
 
 class VideoProcessor:
-    def __init__(self, target_fps=2, frame_size=(160, 160), device=None):
+    def __init__(self, target_fps=2, device=None):
         """
         Initializes the Video Processor for CLIP semantic feature encoding.
         """
         self.target_fps = target_fps
-        self.frame_size = frame_size
         self.MAX_FRAMES = 300  # Hard cap: guarantees <30s processing on CPU
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -27,7 +26,8 @@ class VideoProcessor:
 
     def extract_frames(self, video_path):
         """
-        Extracts frames from a video with adaptive FPS to cap total frames at MAX_FRAMES.
+        Extracts frames at 480p quality with adaptive FPS capped at MAX_FRAMES.
+        Returns frames at 480p for high-quality output, plus skip_frames for duration calc.
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -42,7 +42,7 @@ class VideoProcessor:
         skip_frames = max(1, int(total_video_frames / ideal_sample_count))
         print(f"Video: {duration_secs:.1f}s | Sampling every {skip_frames} frames (~{ideal_sample_count} total)")
 
-        frames = []
+        frames_480p = []   # 480p stored for high-quality output
         frame_indices = []
         count = 0
 
@@ -50,39 +50,40 @@ class VideoProcessor:
             ret, frame = cap.read()
             if not ret:
                 break
-                
             if count % skip_frames == 0:
-                # Resize immediately on read to cut memory usage
-                frame_small = cv2.resize(frame, self.frame_size)
-                rgb_frame = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
-                frames.append(rgb_frame)
+                # Store at 480p (good output quality, manageable memory)
+                h, w = frame.shape[:2]
+                new_w = int(w * 480 / h) if h > 0 else 854
+                frame_480 = cv2.resize(frame, (new_w, 480))
+                rgb_frame = cv2.cvtColor(frame_480, cv2.COLOR_BGR2RGB)
+                frames_480p.append(rgb_frame)
                 frame_indices.append(count)
-                if len(frames) >= self.MAX_FRAMES:
+                if len(frames_480p) >= self.MAX_FRAMES:
                     break
-
             count += 1
 
         cap.release()
-        return frames, frame_indices, orig_fps
+        return frames_480p, frame_indices, orig_fps, skip_frames
 
-    def extract_features(self, frames):
+    def extract_features(self, frames_480p):
         """
-        Extracts semantic features using CLIP with speed-optimized batching.
+        Extracts semantic features using CLIP. Resizes to 160px ONLY for CLIP processing.
+        The original 480p frames are kept intact for high-quality output.
         """
         all_features = []
-        batch_size = 64  # Doubled from 32 for faster throughput
+        batch_size = 64
         
         with torch.no_grad():
-            for i in range(0, len(frames), batch_size):
-                batch = frames[i : i + batch_size]
-                inputs = self.processor(images=list(batch), return_tensors="pt", padding=True).to(self.device)
+            for i in range(0, len(frames_480p), batch_size):
+                batch = frames_480p[i : i + batch_size]
+                # Downscale ONLY for CLIP — 160px is enough for semantic understanding
+                small_batch = [cv2.resize(f, (160, 160)) for f in batch]
+                inputs = self.processor(images=small_batch, return_tensors="pt", padding=True).to(self.device)
                 feat = self.model.get_image_features(**inputs)
                 
-                # Handle HuggingFace version API discrepancies (Tuple/Object vs Tensor)
                 if not isinstance(feat, torch.Tensor):
                     feat = getattr(feat, 'image_embeds', getattr(feat, 'pooler_output', feat[0]))
 
-                # Normalize features
                 feat = feat / feat.norm(dim=-1, keepdim=True)
                 all_features.append(feat.cpu().numpy())
                 
@@ -90,20 +91,13 @@ class VideoProcessor:
 
     def process_video(self, video_path):
         """
-        Runs the full preprocessing pipeline: Extraction -> Resizing/Normalization -> Feature Encoding -> Segmentation.
-        Returns:
-            features: np array of shape (N, 2048)
-            frames: list of numpy arrays (the raw frames for later generation)
-            frame_indices: list of original frame indices
-            fps: original video fps
-            segments: KTS shot boundaries [[start, end], ...]
+        Full pipeline: Extract 480p frames -> CLIP features -> KTS segments.
+        Returns skip_frames so generator can compute output duration correctly.
         """
         from src.preprocess.segmentation import get_segments
         
-        frames, frame_indices, fps = self.extract_frames(video_path)
+        frames, frame_indices, fps, skip_frames = self.extract_frames(video_path)
         features = self.extract_features(frames)
-        
-        # Calculate segments (KTS) based on extracted features
         segments = get_segments(features)
         
-        return features, frames, frame_indices, fps, segments
+        return features, frames, frame_indices, fps, segments, skip_frames

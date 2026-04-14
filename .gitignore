@@ -13,3 +13,5 @@ model_weights_fold_*.pth
 model_weights_latest.pth
 model_weights.pth
 .idea/
+
+*.log

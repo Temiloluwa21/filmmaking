@@ -1,35 +1,43 @@
 import cv2
 import numpy as np
+import os
+from moviepy import VideoFileClip, concatenate_videoclips
 
 class SummaryGenerator:
     def __init__(self, threshold=None, top_k=None):
         self.threshold = threshold
         self.top_k = top_k
 
-    def generate_summary(self, frames, frame_indices, scores, output_path, fps=30,
+    def generate_summary(self, video_path, frames, frame_indices, scores, output_path, fps=30,
                          segments=None, target_duration_secs=120, frames_per_sample=1):
         """
-        Selects key shots and generates a summary video of the target duration.
-        Each selected keyframe is held for its proportional time slice.
-
-        target_duration_secs: desired output length (120=2min, 300=5min)
-        frames_per_sample: how many original frames each sampled frame represents
+        Selects key shots based on scores and generates a summary video with original audio.
+        Uses moviepy to stitch actual sub-clips from the original video for maximum quality.
         """
         n_frames = len(frames)
         assert n_frames == len(scores), "Number of frames must match number of scores"
 
-        # How long to hold each keyframe: proportional to skip rate, capped at 2s
-        hold_frames = min(int(frames_per_sample), int(fps * 2))
-        hold_frames = max(hold_frames, 1)
-
-        # Time-based capacity: how many sampled frames needed for target duration
+        # Time-based capacity: how many total sampled frames can we afford?
+        # Note: hold_frames isn't used for moviepy since we take actual clips, 
+        # but we use the same capacity logic to decide how many segments to pick.
         target_original_frames = int(target_duration_secs * fps)
-        capacity = max(int(target_original_frames / hold_frames), 1)
+        capacity = max(target_original_frames // int(frames_per_sample or 1), 1)
         capacity = min(capacity, n_frames)
-        print(f"Target: {target_duration_secs}s | hold={hold_frames}f | capacity={capacity} sampled frames")
 
+        print(f"Target duration: {target_duration_secs}s | Selection Capacity: {capacity} frames")
+
+        selected_segments = []
         if segments is None:
+            # Fallback to simple top frames if no segments
             selected_indices = sorted(np.argsort(scores)[-capacity:])
+            # For moviepy, we need continuous clips. We'll group them for smoother audio.
+            if selected_indices:
+                curr_start = selected_indices[0]
+                for i in range(1, len(selected_indices)):
+                    if selected_indices[i] != selected_indices[i-1] + 1:
+                        selected_segments.append((curr_start, selected_indices[i-1] + 1))
+                        curr_start = selected_indices[i]
+                selected_segments.append((curr_start, selected_indices[-1] + 1))
         else:
             # SHOT-BASED SELECTION via DP Knapsack
             n_segs = len(segments)
@@ -57,29 +65,58 @@ class SummaryGenerator:
             w = capacity
             for i in range(n, 0, -1):
                 if dp[i][w] != dp[i-1][w]:
-                    start, end = segments[i-1]
-                    selected_indices.extend(range(start, min(end, n_frames)))
+                    selected_segments.append(segments[i-1])
                     w -= weights[i-1]
+            
+            selected_segments.sort()
 
-            selected_indices.sort()
+        if not selected_segments:
+            print("Warning: Selection failed. Falling back to simple summary.")
+            return None
 
-        if not selected_indices:
-            print("Warning: Knapsack selected empty. Falling back to top frames.")
-            selected_indices = sorted(np.argsort(scores)[-max(capacity, 1):])
+        # --- High Quality Stitching with Audio ---
+        try:
+            print(f"Stitching {len(selected_segments)} clips from original video with audio...")
+            video = VideoFileClip(video_path)
+            clips = []
+            
+            for start_idx, end_idx in selected_segments:
+                # Map sampled indices back to original timestamps
+                # frame_indices[i] is the original frame number
+                # time = original_frame_number / original_fps
+                t_start = frame_indices[start_idx] / fps
+                t_end = frame_indices[min(end_idx-1, len(frame_indices)-1)] / fps
+                
+                # Small safety buffer to ensure valid clip duration
+                if t_end > t_start:
+                    clips.append(video.subclipped(t_start, t_end))
 
-        # Write output video — repeat each frame for hold_frames to fill duration
-        height, width, _ = frames[0].shape
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            if not clips:
+                print("Error: No valid clips extracted.")
+                video.close()
+                return None
 
-        estimated_secs = len(selected_indices) * hold_frames / fps
-        print(f"Generating summary: {len(selected_indices)} keyframes x {hold_frames} holds = ~{estimated_secs:.0f}s output")
+            final_summary = concatenate_videoclips(clips)
+            
+            # Write with professional encoding (H.264/AAC) for browser compatibility
+            final_summary.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac", 
+                temp_audiofile='temp-audio.m4a', 
+                remove_temp=True,
+                logger=None # Suppress verbose progress bars
+            )
+            
+            # Cleanup
+            for c in clips: c.close()
+            final_summary.close()
+            video.close()
+            
+            return output_path
 
-        for idx in selected_indices:
-            frame_rgb = frames[idx]
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-            for _ in range(hold_frames):
-                out.write(frame_bgr)
-
-        out.release()
-        return output_path
+        except Exception as e:
+            print(f"Error during audio-synced generation: {e}")
+            import traceback
+            traceback.print_exc()
+            return None

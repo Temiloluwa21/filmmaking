@@ -1,21 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Video Summarizer Pro</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;600&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
     <!-- Persistent Global Navbar -->
     <nav class="navbar hidden" id="navbar">
-        <div class="nav-logo">AI.Summarizer</div>
+        <div class="nav-logo">Video.Summarizer</div>
         <div class="nav-links">
             <a href="#" data-target="home-view" class="active">Home</a>
             <a href="#" data-target="dashboard-view" class="auth-only">Dashboard</a>
-            <a href="#" data-target="library-view" class="auth-only">Library</a>
+
             <a href="#" id="logout-btn" class="auth-only alert-text">Logout</a>
         </div>
     </nav>
@@ -25,8 +29,9 @@
         <!-- 1. HOME VIEW (Landing Page) -->
         <div id="home-view" class="view active-view">
             <header>
-                <h1>AI Video Editor</h1>
-                <p>Welcome to the ultimate semantic video engine. Transform hours of footage into cinematic highlights.</p>
+                <h1>Video Summary Editor</h1>
+                <p>Welcome to the ultimate semantic video engine. Transform hours of footage into cinematic highlights.
+                </p>
             </header>
             <div class="hero-actions">
                 <button class="primary-btn nav-btn" data-target="login-view">Log In</button>
@@ -51,7 +56,8 @@
                     <input type="password" id="login-password" placeholder="••••••••" required>
                 </div>
                 <button type="submit" class="primary-btn">Sign In</button>
-                <p class="switch-link">Don't have an account? <a href="#" class="nav-btn" data-target="register-view">Sign Up</a></p>
+                <p class="switch-link">Don't have an account? <a href="#" class="nav-btn"
+                        data-target="register-view">Sign Up</a></p>
             </form>
         </div>
 
@@ -75,7 +81,8 @@
                     <input type="password" id="reg-password" placeholder="••••••••" required>
                 </div>
                 <button type="submit" class="primary-btn">Create Account</button>
-                <p class="switch-link">Already a member? <a href="#" class="nav-btn" data-target="login-view">Log In</a></p>
+                <p class="switch-link">Already a member? <a href="#" class="nav-btn" data-target="login-view">Log In</a>
+                </p>
             </form>
         </div>
 
@@ -91,18 +98,22 @@
                         <span class="file-msg">Drag & Drop .mp4 Video Here</span>
                         <input class="file-input" type="file" id="video-input" accept="video/mp4">
                     </div>
-                    
+
                     <div class="query-area input-group">
                         <label for="query-input">What are you looking for?</label>
                         <input type="text" id="query-input" placeholder="e.g. 'epic action', 'dramatic conversations'">
                     </div>
-                    
+
                     <button id="summarize-btn" class="primary-btn shimmer-btn">Generate Summary</button>
                 </section>
 
                 <section class="loading-section hidden" id="loading-section">
-                    <div class="spinner"></div>
-                    <p class="loading-text" id="loading-text">Analyzing Video Feed...</p>
+                    <div class="progress-container">
+                        <div class="progress-track">
+                            <div id="progress-fill" class="progress-fill"></div>
+                        </div>
+                        <p class="loading-text" id="loading-text">Analyzing Video Feed...</p>
+                    </div>
                 </section>
 
                 <section class="result-section hidden" id="result-section">
@@ -110,33 +121,21 @@
                     <video id="summary-player" controls autoplay></video>
                     <div class="action-row">
                         <a id="download-link" href="#" class="primary-btn" download>Download Highlights</a>
-                        <button id="save-library-btn" class="secondary-btn">Save to Library</button>
+
                     </div>
                     <button id="new-video-btn" class="secondary-btn margin-top-1">Summarize Another Video</button>
                 </section>
             </main>
         </div>
 
-        <!-- 5. LIBRARY VIEW -->
-        <div id="library-view" class="view hidden-view">
-            <header>
-                <h2>My Library</h2>
-                <p>Your previously generated cinematic highlights.</p>
-            </header>
-            <div class="gallery-grid" id="library-gallery">
-                <!-- Gallery items will be injected here via JS -->
-                <div class="empty-state">
-                    <p>You haven't generated any summaries yet.</p>
-                    <button class="secondary-btn nav-btn" data-target="dashboard-view">Go to Studio</button>
-                </div>
-            </div>
-        </div>
+
 
     </div>
 
     <!-- Notification Toast -->
     <div id="toast" class="toast hidden"></div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2.0"></script>
 </body>
+
 </html>

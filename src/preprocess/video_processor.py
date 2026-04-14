@@ -6,28 +6,27 @@ from transformers import CLIPProcessor, CLIPModel
 class VideoProcessor:
     def __init__(self, target_fps=2, device=None):
         """
-        Initializes the Video Processor for CLIP semantic feature encoding.
+        Setup the video processor and load the model.
         """
         self.target_fps = target_fps
         self.MAX_FRAMES = 300  # Hard cap: guarantees <30s processing on CPU
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Load CLIP ViT-B/32 — offline-first to avoid network failures
+        # Load the model - using local files if available to avoid download issues
         print(f"Loading CLIP on {self.device}...")
         self.model_name = "openai/clip-vit-base-patch32"
         try:
             self.model = CLIPModel.from_pretrained(self.model_name, local_files_only=True).to(self.device)
             self.processor = CLIPProcessor.from_pretrained(self.model_name, local_files_only=True)
         except Exception:
-            print("Cache miss — downloading CLIP from HuggingFace...")
+            # Download if not in cache
             self.model = CLIPModel.from_pretrained(self.model_name).to(self.device)
             self.processor = CLIPProcessor.from_pretrained(self.model_name)
         self.model.eval()
 
     def extract_frames(self, video_path):
         """
-        Extracts frames at 480p quality with adaptive FPS capped at MAX_FRAMES.
-        Returns frames at 480p for high-quality output, plus skip_frames for duration calc.
+        Extract frames from the video at a set resolution.
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -67,8 +66,7 @@ class VideoProcessor:
 
     def extract_features(self, frames_480p):
         """
-        Extracts semantic features using CLIP. Resizes to 160px ONLY for CLIP processing.
-        The original 480p frames are kept intact for high-quality output.
+        Run the model on extracted frames to get features.
         """
         all_features = []
         batch_size = 64
@@ -88,6 +86,20 @@ class VideoProcessor:
                 all_features.append(feat.cpu().numpy())
                 
         return np.concatenate(all_features, axis=0)
+
+    def get_text_features(self, text):
+        """
+        Get features for the text query.
+        """
+        if not text:
+            return None
+        with torch.no_grad():
+            inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
+            text_features = self.model.get_text_features(**inputs)
+            if not isinstance(text_features, torch.Tensor):
+                text_features = getattr(text_features, 'text_embeds', getattr(text_features, 'pooler_output', text_features[0]))
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        return text_features.cpu().numpy()
 
     def process_video(self, video_path):
         """

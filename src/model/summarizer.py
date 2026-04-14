@@ -68,7 +68,7 @@ class SelfAttention(nn.Module):
         return self.norm(out + x) # Residual + Norm
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=20000):
+    def __init__(self, d_model, max_len=1024):
         super(PositionalEncoding, self).__init__()
         self.encoding = nn.Parameter(torch.zeros(1, max_len, d_model))
         
@@ -80,13 +80,13 @@ class VideoSummarizer(nn.Module):
     def __init__(self, input_size=512, hidden_size=256, num_layers=3, query_size=384, transformer_heads=8):
         super(VideoSummarizer, self).__init__()
         
-        # 0. Initial Projection for CLIP Features
+        # Project clip features to hidden size
         self.feat_proj = nn.Linear(input_size, hidden_size*2)
         
-        # 1. Positional Encoding
+        # Setup positional encoding
         self.pos_encoder = PositionalEncoding(hidden_size*2)
         
-        # 2. Transformer Encoder Layer (Global Context)
+        # Setup transformer for global context
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size*2, 
             nhead=transformer_heads, 
@@ -96,7 +96,7 @@ class VideoSummarizer(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
         
-        # 3. 3-Layer Residual Bi-LSTM (Temporal Dynamics)
+        # 3-layer LSTM for sequence handling
         self.lstms = nn.ModuleList([
             nn.LSTM(hidden_size*2, 
                     hidden_size, 
@@ -110,10 +110,10 @@ class VideoSummarizer(nn.Module):
                             
         lstm_out_size = hidden_size * 2 
         
-        # 4. Multi-Head Query Attention (Semantic Alignment)
+        # Attention mechanism for the search query
         self.query_attention = MultiHeadQueryAttention(hidden_size=lstm_out_size, query_size=query_size)
         
-        # 5. Score Regressor
+        # Final scoring layer
         self.score_regressor = nn.Sequential(
             nn.Linear(lstm_out_size, 128),
             nn.LayerNorm(128),
@@ -128,25 +128,25 @@ class VideoSummarizer(nn.Module):
         x: CLIP features, shape (batch, seq_len, input_size)
         q: Query embedding, shape (batch, query_size)
         """
-        # 0. Project and Encode Position
+        # Project and encode
         h = self.feat_proj(x)
         h = self.pos_encoder(h)
         
-        # 1. Transformer Global Context
+        # Run global context
         h = self.transformer_encoder(h)
         
-        # 2. Residual Stacked LSTM
+        # Run through LSTM layers with residual connections
         for i, (lstm, norm) in enumerate(zip(self.lstms, self.lstm_norms)):
             h_next, _ = lstm(h)
             h = norm(h_next + h) # Residual connection with LayerNorm
         
-        # 3. Multi-Head Query Attention
+        # Calculate attention weights
         attn_weights, context = self.query_attention(h, q)
         
-        # 4. Feature weighting
+        # weight the features
         attended_features = h * attn_weights
         
-        # 5. Score Regressor
+        # generate scores
         scores = self.score_regressor(attended_features)
         
         return scores.squeeze(-1)

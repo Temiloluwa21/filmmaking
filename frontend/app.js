@@ -2,7 +2,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State Management ---
     let currentUser = null; 
-    let libraryItems = JSON.parse(localStorage.getItem('aiLibraryItems')) || [];
 
     // --- DOM Elements ---
     const navbar = document.getElementById('navbar');
@@ -24,37 +23,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultSection = document.getElementById('result-section');
     const uploadSection = document.getElementById('upload-section');
     const loadingText = document.getElementById('loading-text');
+    const progressFill = document.getElementById('progress-fill');
     const summaryPlayer = document.getElementById('summary-player');
     const downloadLink = document.getElementById('download-link');
     const fileDropArea = document.getElementById('file-drop-area');
     const fileMsg = document.querySelector('.file-msg');
     const newVideoBtn = document.getElementById('new-video-btn');
-    const saveLibraryBtn = document.getElementById('save-library-btn');
-    const libraryGallery = document.getElementById('library-gallery');
 
     // --- 1. SPA Routing Logic ---
     function navigateTo(targetViewId) {
-        // Enforce Authentication
-        if ((targetViewId === 'dashboard-view' || targetViewId === 'library-view') && !currentUser) {
+        if ((targetViewId === 'dashboard-view') && !currentUser) {
             showToast("Please log in to access this page.", true);
             navigateTo('login-view');
             return;
         }
 
-        // Hide all views
         views.forEach(view => {
             view.classList.remove('active-view');
             view.classList.add('hidden-view');
         });
 
-        // Show target view
         const targetView = document.getElementById(targetViewId);
         if (targetView) {
             targetView.classList.remove('hidden-view');
             targetView.classList.add('active-view');
         }
 
-        // Update Navbar Activity State
         document.querySelectorAll('.nav-links a').forEach(link => {
             link.classList.remove('active');
             if(link.getAttribute('data-target') === targetViewId) {
@@ -63,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Attach click listeners to all navigational buttons/links
     navLinks.forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
@@ -90,7 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loginForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const email = document.getElementById('login-email').value;
-        // Mocking login immediately
         updateAuthState(email);
     });
 
@@ -127,7 +119,6 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         fileDropArea.style.borderColor = 'rgba(255, 255, 255, 0.2)';
         fileDropArea.style.backgroundColor = 'transparent';
-        
         if (e.dataTransfer.files.length > 0) {
             videoInput.files = e.dataTransfer.files;
             fileMsg.textContent = e.dataTransfer.files[0].name;
@@ -145,58 +136,49 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadSection.classList.remove('hidden');
         fileMsg.textContent = "Drag & Drop .mp4 Video Here";
         videoInput.value = '';
+        progressFill.style.width = '0%';
     });
 
 
-    // --- 4. The Extent of Summarization Logic & LocalStorage ---
+    // --- 4. Summarization Polling Logic ---
 
-    function renderLibrary() {
-        const emptyState = document.querySelector('.empty-state');
-        // Clear current elements, keeping the empty state div if exists
-        libraryGallery.innerHTML = '';
-        if (libraryItems.length === 0) {
-            if (emptyState) libraryGallery.appendChild(emptyState);
-            return;
-        }
+    async function pollStatus(taskId) {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/status/${taskId}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                // Update Progress UI
+                progressFill.style.width = `${data.progress}%`;
+                loadingText.textContent = data.status;
 
-        libraryItems.forEach(item => {
-            const card = document.createElement('div');
-            card.className = 'library-card';
-            card.style.background = 'rgba(30, 41, 59, 0.8)';
-            card.style.padding = '1rem';
-            card.style.borderRadius = '12px';
-            card.style.border = '1px solid rgba(255,255,255,0.1)';
-            
-            card.innerHTML = `
-                <div style="width:100%; height:150px; border-radius:8px; margin-bottom:0.5rem; background:linear-gradient(45deg, #4f46e5, #c084fc); display:flex; align-items:center; justify-content:center; color:white; font-weight:800;">🎥 ${item.videoName}</div>
-                <p style="font-size:0.9rem; color:white;">Query: "${item.query}"</p>
-                <p style="font-size:0.8rem; color:#94a3b8;">Saved: ${item.date}</p>
-            `;
-            libraryGallery.prepend(card);
-        });
+                if (data.progress === 100 && data.file_id) {
+                    clearInterval(interval);
+                    
+                    // Direct URL mapping to avoid 'WinError 10054' by letting browser handle streaming
+                    const videoUrl = `/api/download/${data.file_id}`;
+                    
+                    loadingSection.classList.add('hidden');
+                    resultSection.classList.remove('hidden');
+                    summaryPlayer.src = videoUrl;
+                    summaryPlayer.load();
+                    downloadLink.href = videoUrl;
+                    downloadLink.download = "ai_summary.mp4";
+                    showToast("Summary Generated Successfully!");
+                } else if (data.status.startsWith("Error")) {
+                    clearInterval(interval);
+                    throw new Error(data.status);
+                }
+            } catch (error) {
+                console.error(error);
+                clearInterval(interval);
+                showToast(error.message || "Processing failed.", true);
+                loadingSection.classList.add('hidden');
+                uploadSection.classList.remove('hidden');
+            }
+        }, 1500);
     }
-
-    // Load library immediately
-    renderLibrary();
-
-    saveLibraryBtn.addEventListener('click', () => {
-        if(!summaryPlayer.src) return;
-        
-        let vName = "Video Snippet";
-        if (videoInput.files.length > 0) vName = videoInput.files[0].name;
-
-        const newItem = {
-            videoName: vName,
-            query: queryInput.value,
-            date: new Date().toLocaleDateString()
-        };
-
-        libraryItems.push(newItem);
-        localStorage.setItem('aiLibraryItems', JSON.stringify(libraryItems));
-        
-        renderLibrary();
-        showToast("Saved to My Library Permanently!");
-    });
 
     summarizeBtn.addEventListener('click', async () => {
         if (videoInput.files.length === 0) {
@@ -204,32 +186,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        const videoFile = videoInput.files[0];
-        const query = queryInput.value.trim();
-
         const formData = new FormData();
-        formData.append("video", videoFile);
-        if (query) {
-            formData.append("query", query);
-        }
+        formData.append("video", videoInput.files[0]);
+        if (queryInput.value.trim()) formData.append("query", queryInput.value.trim());
 
         uploadSection.classList.add('hidden');
         loadingSection.classList.remove('hidden');
-
-        const loadingStates = [
-            "Analyzing Video Feed...",
-            "Extracting Semantic Frame Features...",
-            "Encoding Transformer Query...",
-            "Running Bi-LSTM Temporal Analysis...",
-            "Executing Knapsack Frame Selection...",
-            "Stitching Cinematic Highlights..."
-        ];
-        let stateIndex = 0;
-        loadingText.textContent = loadingStates[0];
-        const loadingInterval = setInterval(() => {
-            stateIndex = (stateIndex + 1) % loadingStates.length;
-            loadingText.textContent = loadingStates[stateIndex];
-        }, 3500);
+        progressFill.style.width = '2%';
+        loadingText.textContent = "Uploading video to secure container...";
 
         try {
             const response = await fetch('/api/summarize', {
@@ -237,32 +201,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: formData
             });
 
-            if (!response.ok) {
-                throw new Error("Summarization failed.");
-            }
-
-            const videoBlob = await response.blob();
-            const videoUrl = URL.createObjectURL(videoBlob);
+            if (!response.ok) throw new Error("Upload failed.");
             
-            loadingSection.classList.add('hidden');
-            resultSection.classList.remove('hidden');
+            const data = await response.json();
+            pollStatus(data.task_id); // Start polling for real-time progress
             
-            summaryPlayer.src = videoUrl;
-            downloadLink.href = videoUrl;
-            downloadLink.download = "ai_summary.mp4";
-            
-            showToast("Summary Generated Successfully!");
         } catch (error) {
             console.error(error);
-            showToast("An error occurred during processing. Please ensure your backend is running.", true);
+            showToast("Upload failed. Ensure backend is running.", true);
             loadingSection.classList.add('hidden');
             uploadSection.classList.remove('hidden');
-        } finally {
-            clearInterval(loadingInterval);
         }
     });
 
-    // --- Helper ---
     function showToast(message, isError = false) {
         toast.textContent = message;
         toast.style.background = isError ? '#ef4444' : '#10b981';
